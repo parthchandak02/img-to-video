@@ -1,174 +1,136 @@
-# Image to Video Generator
+<div align="center">
 
-A simple script to create MP4 videos with horizontally scrolling text or images, optimized for horizontal bar displays.
+<h1>img-to-video</h1>
 
-## Features
+<p><b>Scrolling text and image MP4s for bar displays.</b></p>
 
-- Create scrolling or static text videos
-- Use images as content (either scrolling or static)
-- Customize dimensions, colors, and text properties
-- Optimized for horizontal bar displays
-- Adjustable aspect ratios
-- Control scrolling speed
-- Set custom background colors
+<p><i>A long, thin LED or LCD bar plays video. This script makes the ticker video it needs from one command.</i></p>
 
-## Requirements
+<h6>
 
-```
-pip install moviepy numpy opencv-python
-```
+![Python](https://img.shields.io/badge/Python-3-111111?style=flat-square&logo=python&logoColor=white)
+![MoviePy](https://img.shields.io/badge/MoviePy-1.0.3-E0A526?style=flat-square)
+![ImageMagick](https://img.shields.io/badge/needs-ImageMagick-E0A526?style=flat-square)
+![Status](https://img.shields.io/badge/status-experiment-555555?style=flat-square)
 
-Note: `opencv-python` is required for proper image processing.
+</h6>
 
-## Usage Examples
+<a href="#how-it-works"><b>How it works</b></a> ·
+<a href="#install"><b>Install</b></a> ·
+<a href="#usage"><b>Usage</b></a>
 
-### Text-Based Videos
+<br><br>
 
-#### Basic Usage - Scrolling Text
+<img src="docs/assets/readme/frames.png" width="720" alt="Six frames, one second apart, from a 1280 by 96 video: yellow bold text reading Platform 4: the 08:15 express is running on time enters from the right edge and scrolls off the left">
 
-Create a default scrolling text video (10 seconds):
+<sub>Frames sampled once a second from a real 6-second render. Made-up message.</sub>
 
-```bash
-python img_to_video.py
-```
+</div>
 
-or explicitly specify text-only mode:
+<br>
 
-```bash
-python img_to_video.py --text-only
-```
+## Why
 
-#### Static Text (No Scrolling)
+Stretched bar displays (448×32, 1280×120, 1920×100) usually play a looping video file rather
+than taking text input. Making a ticker for one in a video editor is slow for a one-line
+message. `img_to_video.py` renders that video directly: pick the text or images, the frame
+size and the duration, and it writes an H.264 MP4.
 
-```bash
-python img_to_video.py --text-only --no-scroll
-```
+## How it works
 
-#### Custom Text
+<table>
+<tr>
+<td width="33%" valign="top">
 
-```bash
-python img_to_video.py --text-only --text "Your custom message here"
-```
+**1 · Pick the content**
 
-### Image-Based Videos
+A line of text (`--text-only`), or every JPG and PNG in `input/` (`--use-image-bg`), one
+video per image.
 
-#### Scrolling Image
+</td>
+<td width="33%" valign="top">
 
-Create a video with an image scrolling from right to left:
+**2 · Size the frame**
 
-```bash
-python img_to_video.py --use-image-bg
-```
+Defaults to 448×32. Set `--width` and `--height`, or `--aspect 20:1` to derive the height
+from the width.
 
-This will process all images in the `input` folder and create corresponding videos in the `output` folder.
+</td>
+<td width="33%" valign="top">
 
-#### Static Image
+**3 · Render**
 
-Create a video with a static image displayed for the duration:
+MoviePy draws each frame, moving the text right to left so it crosses the whole frame once
+per `--duration`, and writes `output/*.mp4`.
 
-```bash
-python img_to_video.py --use-image-bg --no-scroll
-```
+</td>
+</tr>
+</table>
 
-#### Image Fitting Options
+<div align="center">
+<img src="docs/assets/readme/cli.png" width="720" alt="Terminal: the img_to_video.py command for the frames above, MoviePy build and write messages, then ffprobe reporting an h264 stream at 1280 by 96, 24 fps, 144 frames">
+<br><sub>The run that produced the frames above, checked with ffprobe.</sub>
+</div>
 
-Fit the entire image within the frame (may add letterboxing):
+## What it does
 
-```bash
-python img_to_video.py --use-image-bg --fit
-```
+- **Scrolling or static text.** Text enters from the right and exits left; `--no-scroll` centres it instead.
+- **Speed control.** By default one pass takes the whole duration; `--scroll-speed` sets pixels per second.
+- **Colours.** `--color` for the text, `--bg-color` for the frame (named colours or `#RRGGBB`).
+- **Images in, one video each.** Every image in `input/` becomes its own MP4, stretched to the frame, fitted with black bars (`--fit`) or centre-cropped (`--fill`).
+- **Falls back to text.** With no images in `input/`, it renders the text video instead.
 
-Fill the frame with the image (may crop parts of the image):
+Known limit: image videos come out static. The scroll position is set on a clip that is never
+composited, so only text actually scrolls. Behind `--bg-color`, the text sits on a black box.
 
-```bash
-python img_to_video.py --use-image-bg --fill
-```
+## Install
 
-### Customization Options
-
-#### Horizontal Bar Display
-
-Create a video optimized for horizontal bar displays:
+Needs MoviePy 1.x (2.x removed the `moviepy.editor` and `set_fps` API this uses), ffmpeg, and
+ImageMagick, which MoviePy calls to draw text.
 
 ```bash
-python img_to_video.py --horizontal-bar
+git clone https://github.com/parthchandak02/img-to-video.git
+cd img-to-video
+pip install "moviepy==1.0.3" numpy pillow opencv-python
+brew install imagemagick      # or set IMAGEMAGICK_BINARY to a magick binary
 ```
 
-#### Custom Dimensions
+## Usage
 
 ```bash
-python img_to_video.py --width 1920 --height 100
+python img_to_video.py --text-only --text "Doors open at 9"     # 448x32 scrolling text, 10 s
+python img_to_video.py --text-only --no-scroll --bg-color blue  # static, centred
+python img_to_video.py --text-only --width 1280 --height 120    # bigger bar
+python img_to_video.py --use-image-bg --fit                     # each image in input/ -> output/
+python img_to_video.py --aspect 20:1 --duration 30              # 448 wide, height from ratio
 ```
 
-#### Custom Aspect Ratio
+<details>
+<summary><b>All options</b></summary>
 
-```bash
-python img_to_video.py --aspect 20:1
-```
+| Option | |
+|---|---|
+| `--input-folder DIR` | Images to read (default `input`) |
+| `--output-folder DIR` | Where MP4s go (default `output`) |
+| `--text TEXT` | The message |
+| `--duration N` | Seconds (default 10) |
+| `--width`, `--height` | Frame size (default 448×32) |
+| `--aspect W:H` | Overrides height from width |
+| `--fontsize N` | Default 24 |
+| `--color`, `--bg-color` | Text and background colour |
+| `--fps N` | Default 24 |
+| `--no-scroll` | Static instead of scrolling |
+| `--scroll-speed PX` | Pixels per second |
+| `--text-only` | Ignore `input/`, make `output/text_only.mp4` |
+| `--use-image-bg` | Use the images in `input/` |
+| `--fit`, `--fill` | Letterbox or crop images to the frame |
+| `--horizontal-bar` | 448×32, which is already the default |
+| `--center-crop`, `--center-height` | Accepted but not used by the renderer |
 
-#### Custom Colors (for text-based videos)
+</details>
 
-```bash
-python img_to_video.py --text-only --color yellow --bg-color blue
-```
+<br>
 
-#### Custom Scroll Speed
-
-```bash
-python img_to_video.py --scroll-speed 150
-```
-
-#### Longer Duration
-
-```bash
-python img_to_video.py --duration 30
-```
-
-## All Options
-
-```
-  --input-folder DIR     Folder containing input JPG and PNG files (default: 'input')
-  --output-folder DIR    Folder to save output MP4 files (default: 'output')
-  --text TEXT            Text to display in the video
-  --duration DURATION    Duration of the video in seconds (default: 10)
-  --width WIDTH          Width of the video (default: 448 for horizontal bar)
-  --height HEIGHT        Height of the video (default: 32 for horizontal bar)
-  --aspect ASPECT        Aspect ratio in format W:H (e.g. 16:1, 10:1)
-  --fontsize FONTSIZE    Font size of the text (default: 24)
-  --color COLOR          Color of the text (default: white)
-  --bg-color BG_COLOR    Background color (e.g., black, blue, #FF0000) (default: black)
-  --fps FPS              Frames per second (default: 24)
-  --no-scroll            Disable scrolling (static text/image)
-  --scroll-speed SPEED   Custom scroll speed in pixels per second
-  --center-crop          Crop to the center of the text vertically
-  --center-height HEIGHT Height of the center crop
-  --horizontal-bar       Optimize for horizontal bar display
-  --use-image-bg         Use images from input folder as content
-  --text-only            Create a text-only video without using input images
-  --fill                 Fill the video frame with the image (may crop parts of the image)
-  --fit                  Fit the entire image within the video frame (may add letterboxing)
-```
-
-## Workflow Examples
-
-### Creating a Scrolling Banner with Your Logo
-
-1. Place your logo image in the `input` folder
-2. Run: `python img_to_video.py --use-image-bg --width 1280 --height 120`
-
-### Creating a Static Display for Digital Signage
-
-1. Place your image in the `input` folder
-2. Run: `python img_to_video.py --use-image-bg --no-scroll --width 1920 --height 1080`
-
-### Creating Multiple Videos at Once
-
-Place multiple images in the `input` folder and run the script. It will process all JPG and PNG files and create corresponding videos in the `output` folder.
-
-## Troubleshooting
-
-If you encounter errors related to image processing, make sure you have `opencv-python` installed:
-
-```bash
-pip install opencv-python
-```
+<div align="center">
+<sub>One Python script on MoviePy, ImageMagick and ffmpeg.</sub>
+</div>
