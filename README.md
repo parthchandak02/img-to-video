@@ -114,7 +114,7 @@ python img_to_video.py --aspect 20:1 --duration 30              # 448 wide, heig
 | `--width`, `--height` | Frame size (default 448×32) |
 | `--aspect W:H` | Overrides height from width |
 | `--fontsize N` | Default 24 |
-| `--font NAME` | ImageMagick font name or a `.ttf` path (default `Arial-Bold`) |
+| `--font NAME` | ImageMagick font name or a `.ttf` path (default `Arial-Bold`, falling back to an Arial Bold or DejaVu Sans Bold file when ImageMagick has no such font) |
 | `--color`, `--bg-color` | Text and background colour |
 | `--fps N` | Default 24 |
 | `--no-scroll` | Static instead of scrolling |

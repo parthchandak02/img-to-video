@@ -91,6 +91,31 @@ def parse_color(value):
         print(f"Unknown colour {value!r}, using black")
         return (0, 0, 0)
 
+# Font files tried when ImageMagick has no font registered under the requested name
+FALLBACK_FONT_FILES = [
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",   # macOS
+    "/Library/Fonts/Arial Bold.ttf",                       # macOS (older)
+    "C:/Windows/Fonts/arialbd.ttf",                        # Windows
+    "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",  # Linux
+    "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+]
+
+def resolve_font(font):
+    """Return a font ImageMagick can render: a file path, a registered font name, or a bold fallback file."""
+    if os.path.isfile(font):
+        return font
+    try:
+        if font in TextClip.list('font'):
+            return font
+    except Exception:
+        pass
+    for path in FALLBACK_FONT_FILES:
+        if os.path.isfile(path):
+            print(f"ImageMagick has no font named {font!r}, using {path}")
+            return path
+    return font
+
 def make_text_clip(text="Scrolling Text", duration=10, fps=24, 
                   width=1280, height=120, fontsize=70, color='white',
                   bg_color='black', scroll=True, scroll_speed=None,
@@ -116,7 +141,7 @@ def make_text_clip(text="Scrolling Text", duration=10, fps=24,
     """
     
     # Create a text clip
-    txt_clip = TextClip(text, fontsize=fontsize, color=color, font=font)
+    txt_clip = TextClip(text, fontsize=fontsize, color=color, font=resolve_font(font))
 
     # Text pixels plus an alpha mask, so the glyphs sit on the background colour
     # instead of on the black box ImageMagick renders around them.
@@ -370,13 +395,6 @@ def main():
         args.width = 448
     if args.height is None:
         args.height = 32
-    if args.horizontal_bar:
-        if args.fontsize is None:
-            args.fontsize = max(8, int(args.height * 0.75))
-        print(f"Using horizontal bar display mode: {args.width}x{args.height}, font size {args.fontsize}")
-    if args.fontsize is None:
-        args.fontsize = 24
-    
     # Calculate dimensions if aspect ratio is provided
     if args.aspect:
         try:
@@ -388,6 +406,13 @@ def main():
             print(f"Using aspect ratio {args.aspect}, dimensions: {args.width}x{args.height}")
         except ValueError:
             print(f"Invalid aspect ratio format: {args.aspect}. Using default dimensions.")
+    
+    if args.horizontal_bar:
+        if args.fontsize is None:
+            args.fontsize = max(8, int(args.height * 0.75))
+        print(f"Using horizontal bar display mode: {args.width}x{args.height}, font size {args.fontsize}")
+    if args.fontsize is None:
+        args.fontsize = 24
     
     # Create input and output folders if they don't exist
     os.makedirs(args.input_folder, exist_ok=True)
