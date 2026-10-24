@@ -82,10 +82,19 @@ except ImportError:
             print("Error: MoviePy not properly installed. Please install with pip install moviepy==1.0.3")
             sys.exit(1)
 
+def parse_color(value):
+    """Return an (r, g, b) tuple for a colour name or #RRGGBB string."""
+    from PIL import ImageColor
+    try:
+        return ImageColor.getrgb(value)[:3]
+    except ValueError:
+        print(f"Unknown colour {value!r}, using black")
+        return (0, 0, 0)
+
 def make_text_clip(text="Scrolling Text", duration=10, fps=24, 
                   width=1280, height=120, fontsize=70, color='white',
                   bg_color='black', scroll=True, scroll_speed=None,
-                  center_crop=False, center_height=None):
+                  center_crop=False, center_height=None, font='Arial-Bold'):
     """Generate a clip with text that can be static or scrolling.
     
     Args:
@@ -96,6 +105,10 @@ def make_text_clip(text="Scrolling Text", duration=10, fps=24,
         height (int): Height of the video
         fontsize (int): Font size of the text
         color (str): Color of the text
+        bg_color (str): Background colour (name or #RRGGBB)
+        center_crop (bool): Keep only the middle center_height rows of the rendered text
+        center_height (int): Rows kept by center_crop (default: the frame height)
+        font (str): ImageMagick font name or path to a font file
         scroll (bool): Whether to scroll the text or keep it static
         scroll_speed (float): Optional custom scroll speed (pixels per second)
                              If None, speed is calculated to ensure text moves 
@@ -103,86 +116,67 @@ def make_text_clip(text="Scrolling Text", duration=10, fps=24,
     """
     
     # Create a text clip
-    txt_clip = TextClip(text, fontsize=fontsize, color=color, font='Arial-Bold')
-    txt_width = txt_clip.w
-    txt_height = txt_clip.h
-    
+    txt_clip = TextClip(text, fontsize=fontsize, color=color, font=font)
+
+    # Text pixels plus an alpha mask, so the glyphs sit on the background colour
+    # instead of on the black box ImageMagick renders around them.
+    txt_rgb = txt_clip.get_frame(0).astype(np.float32)
+    if txt_clip.mask is not None:
+        txt_alpha = txt_clip.mask.get_frame(0).astype(np.float32)
+    else:
+        txt_alpha = np.ones(txt_rgb.shape[:2], dtype=np.float32)
+
+    # Optionally keep only the vertical middle of the rendered text
+    if center_crop:
+        band = center_height or height
+        if band < txt_rgb.shape[0]:
+            top = (txt_rgb.shape[0] - band) // 2
+            txt_rgb = txt_rgb[top:top + band]
+            txt_alpha = txt_alpha[top:top + band]
+
+    # Static text that is larger than the frame is scaled down to fit
+    if not scroll and (txt_rgb.shape[1] > width or txt_rgb.shape[0] > height):
+        scale = min(width / txt_rgb.shape[1], height / txt_rgb.shape[0])
+        new_size = (max(1, int(txt_rgb.shape[1] * scale)), max(1, int(txt_rgb.shape[0] * scale)))
+        txt_rgb = np.array(Image.fromarray(txt_rgb.astype(np.uint8)).resize(new_size, RESAMPLING_FILTER), dtype=np.float32)
+        txt_alpha = np.array(Image.fromarray((txt_alpha * 255).astype(np.uint8)).resize(new_size, RESAMPLING_FILTER), dtype=np.float32) / 255.0
+
+    txt_height, txt_width = txt_rgb.shape[:2]
+    background = np.empty((height, width, 3), dtype=np.uint8)
+    background[:, :] = parse_color(bg_color)
+
+    def paste(frame, x_pos, y_pos):
+        """Alpha-blend the text onto frame at (x_pos, y_pos), clipped to the frame."""
+        x0, y0 = max(0, x_pos), max(0, y_pos)
+        x1, y1 = min(width, x_pos + txt_width), min(height, y_pos + txt_height)
+        if x1 <= x0 or y1 <= y0:
+            return
+        src = txt_rgb[y0 - y_pos:y1 - y_pos, x0 - x_pos:x1 - x_pos]
+        alpha = txt_alpha[y0 - y_pos:y1 - y_pos, x0 - x_pos:x1 - x_pos, None]
+        region = frame[y0:y1, x0:x1].astype(np.float32)
+        frame[y0:y1, x0:x1] = (src * alpha + region * (1 - alpha)).astype(np.uint8)
+
     # Function to animate the text position
     def make_frame(t):
-        # Create a frame with specified background color
-        if bg_color == 'black':
-            frame = np.zeros((height, width, 3), dtype=np.uint8)
-        else:
-            # Convert color string to RGB
-            if bg_color.startswith('#'):
-                # Hex color code
-                r = int(bg_color[1:3], 16)
-                g = int(bg_color[3:5], 16)
-                b = int(bg_color[5:7], 16)
-            else:
-                # Named color (simple implementation for common colors)
-                color_map = {
-                    'white': (255, 255, 255),
-                    'red': (255, 0, 0),
-                    'green': (0, 255, 0),
-                    'blue': (0, 0, 255),
-                    'yellow': (255, 255, 0),
-                    'cyan': (0, 255, 255),
-                    'magenta': (255, 0, 255),
-                    'gray': (128, 128, 128),
-                    'black': (0, 0, 0)
-                }
-                r, g, b = color_map.get(bg_color.lower(), (0, 0, 0))
-            
-            frame = np.ones((height, width, 3), dtype=np.uint8) * np.array([r, g, b], dtype=np.uint8)
-        
-        # Get text frame
-        txt_frame = txt_clip.get_frame(0)
-        
+        frame = background.copy()
+        y_pos = int((height - txt_height) // 2)
+
         if scroll:
             # Calculate speed if not provided
             if scroll_speed is None:
-                total_width = width + txt_width
-                speed = total_width / duration
+                speed = (width + txt_width) / duration
             else:
                 speed = scroll_speed
-            
-            # Calculate position: start from right edge and move to left
-            x_pos = width - (t * speed) % (width + txt_width)
-            
-            # Calculate vertical position (center)
-            y_pos = int((height - txt_height) // 2)
-            
-            # Only paste the visible part of text
-            if x_pos > 0:
-                visible_width = int(min(txt_width, width - x_pos))
-                if visible_width > 0:
-                    frame[y_pos:y_pos+txt_height, int(x_pos):int(x_pos+visible_width)] = txt_frame[:, :visible_width]
-            
-            # If text wraps around, paste the second part
-            if x_pos < 0:
-                visible_width = int(min(txt_width + x_pos, width))
-                if visible_width > 0:
-                    frame[y_pos:y_pos+txt_height, :int(visible_width)] = txt_frame[:, int(-x_pos):int(-x_pos+visible_width)]
+
+            # Start at the right edge and move left until the text has fully left the frame
+            x_pos = int(width - (t * speed) % (width + txt_width))
         else:
             # Static text centered in frame
             x_pos = int((width - txt_width) // 2)
-            y_pos = int((height - txt_height) // 2)
-            
-            # Ensure text fits within frame
-            if txt_width <= width and txt_height <= height:
-                frame[y_pos:y_pos+txt_height, x_pos:x_pos+txt_width] = txt_frame
-            else:
-                # Scale down text if it's too large
-                scale = min(width / txt_width, height / txt_height)
-                new_w, new_h = int(txt_width * scale), int(txt_height * scale)
-                resized_frame = np.array(txt_clip.resize((new_w, new_h)).get_frame(0))
-                x_pos = int((width - new_w) // 2)
-                y_pos = int((height - new_h) // 2)
-                frame[y_pos:y_pos+new_h, x_pos:x_pos+new_w] = resized_frame
-        
+
+        paste(frame, x_pos, y_pos)
         return frame
-    
+
     # Create and return the clip
     clip = VideoClip(make_frame, duration=duration)
     return clip
@@ -197,14 +191,16 @@ def parse_args():
                         help='Text to display in the video')
     parser.add_argument('--duration', type=int, default=10,
                         help='Duration of the video in seconds')
-    parser.add_argument('--width', type=int, default=448,
+    parser.add_argument('--width', type=int, default=None,
                         help='Width of the video (default: 448 for horizontal bar)')
-    parser.add_argument('--height', type=int, default=32,
+    parser.add_argument('--height', type=int, default=None,
                         help='Height of the video (default: 32 for horizontal bar)')
     parser.add_argument('--aspect', type=str,
                         help='Aspect ratio in format W:H (e.g. 16:1, 10:1). Overrides width/height if provided')
-    parser.add_argument('--fontsize', type=int, default=24,
-                        help='Font size of the text')
+    parser.add_argument('--fontsize', type=int, default=None,
+                        help='Font size of the text (default: 24, or 3/4 of the bar height with --horizontal-bar)')
+    parser.add_argument('--font', type=str, default='Arial-Bold',
+                        help='ImageMagick font name or path to a .ttf/.otf file (default: Arial-Bold)')
     parser.add_argument('--color', type=str, default='white',
                         help='Color of the text')
     parser.add_argument('--bg-color', type=str, default='black',
@@ -216,11 +212,11 @@ def parse_args():
     parser.add_argument('--scroll-speed', type=float,
                         help='Custom scroll speed in pixels per second')
     parser.add_argument('--center-crop', action='store_true',
-                        help='Crop to the center of the text vertically')
+                        help='Keep only the vertical middle of the rendered text (see --center-height)')
     parser.add_argument('--center-height', type=int, default=None,
-                        help='Height of the center crop (if center-crop is enabled)')
+                        help='Rows of text kept by --center-crop (default: the frame height)')
     parser.add_argument('--horizontal-bar', action='store_true',
-                        help='Optimize for horizontal bar display (sets width=448, height=32 if not specified)')
+                        help='Horizontal bar preset: 448x32 unless --width/--height are given, and text sized to 3/4 of the bar height unless --fontsize is given')
     parser.add_argument('--use-image-bg', action='store_true',
                         help='Use the input image as background instead of a solid color')
     parser.add_argument('--text-only', action='store_true',
@@ -239,9 +235,6 @@ def create_video_from_image(image_path, args):
     
     # Determine center crop height if needed
     center_height = args.center_height
-    if args.center_crop and center_height is None:
-        # Default to 1/3 of the height if not specified
-        center_height = args.height // 3
     
     # Create the text clip
     text_clip = make_text_clip(
@@ -255,7 +248,8 @@ def create_video_from_image(image_path, args):
         scroll=not args.no_scroll,
         scroll_speed=args.scroll_speed,
         center_crop=args.center_crop,
-        center_height=center_height
+        center_height=center_height,
+        font=args.font
     )
     
     # Set the fps
@@ -318,36 +312,35 @@ def create_video_from_image(image_path, args):
             img_clip = img_clip.set_duration(args.duration)
             img_clip = img_clip.set_fps(args.fps)
             
-            # When using an image, we either scroll it or display it statically
+            # When using an image, we either scroll it or display it statically.
+            # Either way it is composited onto a frame-sized background, otherwise the
+            # position set on the clip is never rendered.
             try:
-                # Set duration and fps for the image clip
-                img_clip = img_clip.set_duration(args.duration)
-                img_clip = img_clip.set_fps(args.fps)
-                
+                bg = ColorClip((args.width, args.height), color=parse_color(args.bg_color))
+                bg = bg.set_duration(args.duration)
+
                 if not args.no_scroll:
-                    # For scrolling mode, create a function to animate the image position
-                    def make_frame_for_image(t):
-                        # Calculate speed if not provided
-                        if args.scroll_speed is None:
-                            # Calculate speed based on image width and duration
-                            total_width = args.width + img_clip.w
-                            speed = total_width / args.duration
-                        else:
-                            speed = args.scroll_speed
-                        
-                        # Calculate position: start from right edge and move to left
-                        x_pos = args.width - (t * speed) % (args.width + img_clip.w)
-                        return [int(x_pos), 0]
-                    
-                    # Apply the scrolling animation to the image clip
-                    img_clip = img_clip.set_position(make_frame_for_image)
+                    img_w = img_clip.w
+                    if args.scroll_speed is None:
+                        # One full pass (enter right, leave left) per duration
+                        speed = (args.width + img_w) / args.duration
+                    else:
+                        speed = args.scroll_speed
+
+                    def image_position(t):
+                        # Start at the right edge and move left until the image has left the frame
+                        x_pos = args.width - (t * speed) % (args.width + img_w)
+                        return (int(x_pos), int((args.height - img_clip.h) // 2))
+
+                    img_clip = img_clip.set_position(image_position)
                     print("Created scrolling image video")
                 else:
                     # For static mode, just center the image
                     img_clip = img_clip.set_position('center')
                     print("Created static image video")
-                
-                final_clip = img_clip
+
+                final_clip = CompositeVideoClip([bg, img_clip], size=(args.width, args.height))
+                final_clip = final_clip.set_duration(args.duration).set_fps(args.fps)
             except Exception as e:
                 print(f"Error processing image animation: {e}")
                 print("Falling back to text-only clip")
@@ -372,13 +365,17 @@ def main():
     # Parse command line arguments
     args = parse_args()
     
-    # Set horizontal bar defaults if requested
+    # Fill in the frame size (448x32 bar by default) and the font size
+    if args.width is None:
+        args.width = 448
+    if args.height is None:
+        args.height = 32
     if args.horizontal_bar:
-        if args.width is None:
-            args.width = 448
-        if args.height is None:
-            args.height = 32
-        print(f"Using horizontal bar display mode: {args.width}x{args.height}")
+        if args.fontsize is None:
+            args.fontsize = max(8, int(args.height * 0.75))
+        print(f"Using horizontal bar display mode: {args.width}x{args.height}, font size {args.fontsize}")
+    if args.fontsize is None:
+        args.fontsize = 24
     
     # Calculate dimensions if aspect ratio is provided
     if args.aspect:
@@ -399,8 +396,6 @@ def main():
     if args.text_only:
         # Create a single text-only video
         center_height = args.center_height
-        if args.center_crop and center_height is None:
-            center_height = args.height // 3
         
         clip = make_text_clip(
             text=args.text,
@@ -413,7 +408,8 @@ def main():
             scroll=not args.no_scroll,
             scroll_speed=args.scroll_speed,
             center_crop=args.center_crop,
-            center_height=center_height
+            center_height=center_height,
+            font=args.font
         )
         
         clip = clip.set_fps(args.fps)
@@ -432,8 +428,6 @@ def main():
             print("Creating a text-only video instead")
             # Create a text-only video
             center_height = args.center_height
-            if args.center_crop and center_height is None:
-                center_height = args.height // 3
             
             clip = make_text_clip(
                 text=args.text,
@@ -446,7 +440,8 @@ def main():
                 scroll=not args.no_scroll,
                 scroll_speed=args.scroll_speed,
                 center_crop=args.center_crop,
-                center_height=center_height
+                center_height=center_height,
+                font=args.font
             )
             
             clip = clip.set_fps(args.fps)

@@ -77,11 +77,8 @@ per `--duration`, and writes `output/*.mp4`.
 - **Scrolling or static text.** Text enters from the right and exits left; `--no-scroll` centres it instead.
 - **Speed control.** By default one pass takes the whole duration; `--scroll-speed` sets pixels per second.
 - **Colours.** `--color` for the text, `--bg-color` for the frame (named colours or `#RRGGBB`).
-- **Images in, one video each.** Every image in `input/` becomes its own MP4, stretched to the frame, fitted with black bars (`--fit`) or centre-cropped (`--fill`).
+- **Images in, one video each.** Every image in `input/` becomes its own MP4, stretched to the frame, fitted with black bars (`--fit`) or centre-cropped (`--fill`), and scrolled across the `--bg-color` frame like the text (or centred with `--no-scroll`).
 - **Falls back to text.** With no images in `input/`, it renders the text video instead.
-
-Known limit: image videos come out static. The scroll position is set on a clip that is never
-composited, so only text actually scrolls. Behind `--bg-color`, the text sits on a black box.
 
 ## Install
 
@@ -117,6 +114,7 @@ python img_to_video.py --aspect 20:1 --duration 30              # 448 wide, heig
 | `--width`, `--height` | Frame size (default 448×32) |
 | `--aspect W:H` | Overrides height from width |
 | `--fontsize N` | Default 24 |
+| `--font NAME` | ImageMagick font name or a `.ttf` path (default `Arial-Bold`) |
 | `--color`, `--bg-color` | Text and background colour |
 | `--fps N` | Default 24 |
 | `--no-scroll` | Static instead of scrolling |
@@ -124,8 +122,8 @@ python img_to_video.py --aspect 20:1 --duration 30              # 448 wide, heig
 | `--text-only` | Ignore `input/`, make `output/text_only.mp4` |
 | `--use-image-bg` | Use the images in `input/` |
 | `--fit`, `--fill` | Letterbox or crop images to the frame |
-| `--horizontal-bar` | 448×32, which is already the default |
-| `--center-crop`, `--center-height` | Accepted but not used by the renderer |
+| `--horizontal-bar` | 448×32 unless `--width`/`--height` are set, text at 3/4 of the bar height unless `--fontsize` is set |
+| `--center-crop`, `--center-height N` | Keep only the middle N rows of the rendered text (default: frame height) |
 
 </details>
 
